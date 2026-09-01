@@ -33,3 +33,5 @@ What limitations remain?
 | ADR | Title |
 |-----|-------|
 | [ADR-001](ADR-001-in-memory-fixed-window.md) | In-Memory Fixed-Window Rate Limiter |
+| [ADR-002](ADR-002-concurrency-safe-per-user-updates.md) | Concurrency-Safe Per-User Updates |
+| [ADR-003](ADR-003-dedicated-rate-limiter-service.md) | Dedicated Rate Limiter Service |

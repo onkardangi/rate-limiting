@@ -31,51 +31,88 @@ Problems drive the design. Infrastructure and abstractions are introduced only w
 
 ## Current State
 
-**Phase 1 — Fixed Window**
+**Phase 3 — Dedicated Rate Limiter Service**
 
-A single Spring Boot application with a product endpoint protected by an in-memory fixed-window rate limiter.
+A Maven multi-module project with two services:
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/products/{id}` | Returns a hardcoded product response (rate limited) |
+| Module | Port | Responsibility |
+|--------|------|----------------|
+| `app-service` | 8080 | Product API; delegates rate-limit checks over HTTP |
+| `rate-limiter-service` | 8081 | Fixed-window rate limiting; owns in-memory state |
+
+| Endpoint | Service | Description |
+|----------|---------|-------------|
+| `GET /api/products/{id}` | app-service | Returns a hardcoded product response (rate limited) |
+| `POST /api/rate-limit/check` | rate-limiter-service | Internal rate-limit check |
 
 All requests to `/api/products/*` require the `X-User-Id` header.
 
 ## Phase 1 — Fixed Window
 
-We currently run one application instance. Rate-limit state therefore lives in application memory.
-
-Users are temporarily identified using the `X-User-Id` request header. This is a learning simplification — it is **not** a secure production identity mechanism and will eventually be replaced by a trusted identity source.
+We started with one application instance. Rate-limit state lived in application memory.
 
 Each user receives **100 requests per fixed calendar minute**. Request 101 within the same minute returns HTTP 429. The implementation uses a fixed-window counter: one counter per user, reset when the calendar minute changes.
 
+## Phase 2 — Concurrency Safety
+
+Phase 1's plain `HashMap` allowed read-modify-write races under concurrent requests. The fix was `ConcurrentHashMap.compute(...)` to make the entire state transition atomic per user key.
+
+## Phase 3 — Dedicated Rate Limiter Service
+
+### The problem
+
+Phase 2 is correct within one JVM, but if multiple application servers each own rate-limit state, counters fragment. A user could exceed the limit by spreading requests across instances.
+
+### The solution
+
+Extract rate limiting into a dedicated service. Application instances call it over HTTP before serving protected requests. Rate-limit state remains in-memory inside the rate-limiter service for now.
+
+```
+Client
+  |
+  v
+Application Service (app-service)
+  |
+  +--> POST /api/rate-limit/check (HTTP)
+  |
+  v
+Rate Limiter Service (rate-limiter-service)
+  |
+  v
+in-memory ConcurrentHashMap
+```
+
 ### Why this design
 
-- Simplest design satisfying the current requirement
-- Very fast local access
-- No network dependency
-- Minimal infrastructure
-- Easy to understand and test
+- Centralizes rate-limit logic and state
+- Multiple app instances can share one logical limiter
+- Policy can evolve independently of application code
+- No shared datastore yet — we have not demonstrated the need to scale the rate-limiter service itself
 
-This is not the final architecture. It is the starting point from which future limitations will motivate change.
+### Trade-offs accepted
+
+- Extra network hop per protected request
+- Rate-limiter service is an availability dependency
+- Single rate-limiter instance is a bottleneck and single point of failure
+- In-memory state still prevents horizontally scaling the rate-limiter service
 
 ## Known Limitations
 
+### Shared state across rate-limiter instances
+
+The rate-limiter service still holds state in memory. Multiple rate-limiter instances would each maintain independent counters. The next problem to solve: **how can multiple rate-limiter service instances share the same rate-limit state?**
+
 ### Fixed-window boundary bursts
 
-A user can send 100 requests at the end of one minute and another 100 immediately at the beginning of the next minute. This is valid under our current fixed-window semantics but would not satisfy a strict rolling-60-second requirement.
-
-### Single-instance state
-
-Counters exist only inside this application process. Multiple instances would each maintain independent counters.
+A user can send 100 requests at the end of one minute and another 100 immediately at the beginning of the next minute.
 
 ### Process restart
 
-Restarting the application loses all rate-limit state.
+Restarting the rate-limiter service loses all rate-limit state.
 
-### Concurrency
+### Network dependency
 
-The current simple implementation is not designed to guarantee correct counting under concurrent requests. Two threads can both read the same count and both increment it, allowing more than 100 requests in a window.
+The application service depends on the rate-limiter service being available. No retries or circuit breakers have been added.
 
 ### Caller identity
 
@@ -89,24 +126,24 @@ These limitations are intentional. Future phases will use them to motivate archi
 Client
   |
   v
-Spring Boot Application
+app-service (:8080)
   |
-  +--> Rate Limit Filter (X-User-Id, allow/deny)
+  +--> Rate Limit Filter (X-User-Id validation, HTTP check)
+  |
+  +--> Product Endpoint
+  |
+  v (HTTP)
+rate-limiter-service (:8081)
   |
   v
-Product Endpoint
+ConcurrentHashMap (per-user window + count)
 ```
-
-Rate-limit state: in-memory `HashMap` (user → window + count).
 
 ## Planned Evolution
 
 Future phases may explore:
 
-- Rate-limiting algorithms
-- Concurrency
-- Distributed state
-- Atomic operations
+- Shared state across rate-limiter instances
 - Failure handling
 - Horizontal scaling
 - Observability
@@ -125,9 +162,22 @@ Design decisions are documented in [`docs/decisions/`](docs/decisions/).
 
 ## Build and Run
 
+Build all modules:
+
 ```bash
 mvn clean package
-java -jar target/scalable-rate-limiter-0.1.0-SNAPSHOT.jar
+```
+
+Start the rate-limiter service (port 8081):
+
+```bash
+java -jar rate-limiter-service/target/rate-limiter-service-0.1.0-SNAPSHOT.jar
+```
+
+Start the application service (port 8080):
+
+```bash
+java -jar app-service/target/app-service-0.1.0-SNAPSHOT.jar
 ```
 
 ## Test
