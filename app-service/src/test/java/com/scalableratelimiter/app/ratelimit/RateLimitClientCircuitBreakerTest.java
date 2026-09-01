@@ -12,6 +12,7 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import java.net.http.HttpClient;
+import java.util.UUID;
 import java.time.Duration;
 
 import static io.github.resilience4j.circuitbreaker.CircuitBreaker.State.CLOSED;
@@ -40,7 +41,8 @@ class RateLimitClientCircuitBreakerTest {
         restClientBuilder = RestClient.builder();
         rateLimiterServer = MockRestServiceServer.bindTo(restClientBuilder).build();
         circuitBreaker = testCircuitBreaker();
-        rateLimitClient = new RateLimitClient(restClientBuilder, BASE_URL, circuitBreaker);
+        rateLimitClient = new RateLimitClient(restClientBuilder, BASE_URL, circuitBreaker,
+                RateLimitClientTest.permissiveBulkhead());
     }
 
     @Test
@@ -160,7 +162,8 @@ class RateLimitClientCircuitBreakerTest {
         RateLimitClient timeoutClient = new RateLimitClient(
                 RestClient.builder().requestFactory(requestFactoryWithReadTimeout(Duration.ofMillis(50))),
                 "http://127.0.0.1:1",
-                testCircuitBreaker());
+                testCircuitBreaker(),
+                RateLimitClientTest.permissiveBulkhead());
 
         for (int i = 0; i < 4; i++) {
             assertEquals(RateLimitDecision.UNAVAILABLE, timeoutClient.checkRateLimit("alice"));
@@ -198,13 +201,14 @@ class RateLimitClientCircuitBreakerTest {
     }
 
     private static CircuitBreaker testCircuitBreaker() {
-        return CircuitBreaker.of("rate-limiter-test", CircuitBreakerConfig.custom()
+        return CircuitBreaker.of("cb-" + UUID.randomUUID(), CircuitBreakerConfig.custom()
                 .failureRateThreshold(50)
                 .slidingWindowSize(4)
                 .minimumNumberOfCalls(4)
                 .waitDurationInOpenState(Duration.ofMillis(100))
                 .permittedNumberOfCallsInHalfOpenState(1)
                 .recordExceptions(RateLimiterDependencyException.class)
+                .ignoreExceptions(io.github.resilience4j.bulkhead.BulkheadFullException.class)
                 .build());
     }
 

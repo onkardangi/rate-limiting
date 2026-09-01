@@ -41,3 +41,4 @@ What limitations remain?
 | [ADR-007](ADR-007-fail-open-rate-limiter-unavailability.md) | Fail Open on Rate Limiter Unavailability |
 | [ADR-008](ADR-008-bounded-rate-limiter-wait-time.md) | Bounded Rate Limiter Wait Time |
 | [ADR-009](ADR-009-circuit-breaker-for-rate-limiter.md) | Circuit Breaker for Rate Limiter Dependency |
+| [ADR-010](ADR-010-bulkhead-rate-limiter-concurrency.md) | Bulkhead for Rate Limiter Concurrency |

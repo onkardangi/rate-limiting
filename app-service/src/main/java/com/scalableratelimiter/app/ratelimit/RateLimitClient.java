@@ -1,5 +1,7 @@
 package com.scalableratelimiter.app.ratelimit;
 
+import io.github.resilience4j.bulkhead.Bulkhead;
+import io.github.resilience4j.bulkhead.BulkheadFullException;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import org.slf4j.Logger;
@@ -23,21 +25,28 @@ public class RateLimitClient {
 
     private final RestClient restClient;
     private final CircuitBreaker circuitBreaker;
+    private final Bulkhead bulkhead;
 
     public RateLimitClient(@Qualifier("rateLimiterRestClientBuilder") RestClient.Builder restClientBuilder,
                            @Value("${rate-limiter.base-url}") String baseUrl,
-                           CircuitBreaker rateLimiterCircuitBreaker) {
+                           CircuitBreaker rateLimiterCircuitBreaker,
+                           Bulkhead rateLimiterBulkhead) {
         this.restClient = restClientBuilder
                 .baseUrl(baseUrl)
                 .build();
         this.circuitBreaker = rateLimiterCircuitBreaker;
+        this.bulkhead = rateLimiterBulkhead;
     }
 
     public RateLimitDecision checkRateLimit(String userId) {
         try {
-            return circuitBreaker.executeSupplier(() -> invokeRateLimiter(userId));
+            return circuitBreaker.executeSupplier(() ->
+                    bulkhead.executeSupplier(() -> invokeRateLimiter(userId)));
         } catch (CallNotPermittedException e) {
             log.warn("Rate limiter circuit breaker is open; skipping remote call for user {}", userId);
+            return RateLimitDecision.UNAVAILABLE;
+        } catch (BulkheadFullException e) {
+            log.warn("Rate limiter bulkhead capacity exhausted; skipping remote call for user {}", userId);
             return RateLimitDecision.UNAVAILABLE;
         } catch (RateLimiterDependencyException e) {
             return RateLimitDecision.UNAVAILABLE;
@@ -46,6 +55,10 @@ public class RateLimitClient {
 
     CircuitBreaker circuitBreaker() {
         return circuitBreaker;
+    }
+
+    Bulkhead bulkhead() {
+        return bulkhead;
     }
 
     private RateLimitDecision invokeRateLimiter(String userId) {

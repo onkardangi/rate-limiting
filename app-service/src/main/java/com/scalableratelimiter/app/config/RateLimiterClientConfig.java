@@ -1,6 +1,9 @@
 package com.scalableratelimiter.app.config;
 
 import com.scalableratelimiter.app.ratelimit.RateLimiterDependencyException;
+import io.github.resilience4j.bulkhead.Bulkhead;
+import io.github.resilience4j.bulkhead.BulkheadConfig;
+import io.github.resilience4j.bulkhead.BulkheadFullException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import org.slf4j.Logger;
@@ -16,7 +19,8 @@ import java.net.http.HttpClient;
 @Configuration
 @EnableConfigurationProperties({
         RateLimiterClientProperties.class,
-        RateLimiterCircuitBreakerProperties.class
+        RateLimiterCircuitBreakerProperties.class,
+        RateLimiterBulkheadProperties.class
 })
 public class RateLimiterClientConfig {
 
@@ -43,6 +47,7 @@ public class RateLimiterClientConfig {
                 .waitDurationInOpenState(properties.waitDurationInOpenState())
                 .permittedNumberOfCallsInHalfOpenState(properties.permittedCallsInHalfOpenState())
                 .recordExceptions(RateLimiterDependencyException.class)
+                .ignoreExceptions(BulkheadFullException.class)
                 .build();
 
         CircuitBreaker circuitBreaker = CircuitBreaker.of("rateLimiter", config);
@@ -51,5 +56,15 @@ public class RateLimiterClientConfig {
                         event.getStateTransition().getFromState(),
                         event.getStateTransition().getToState()));
         return circuitBreaker;
+    }
+
+    @Bean
+    Bulkhead rateLimiterBulkhead(RateLimiterBulkheadProperties properties) {
+        BulkheadConfig config = BulkheadConfig.custom()
+                .maxConcurrentCalls(properties.maxConcurrentCalls())
+                .maxWaitDuration(properties.maxWaitDuration())
+                .build();
+
+        return Bulkhead.of("rateLimiter", config);
     }
 }

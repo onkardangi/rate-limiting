@@ -1,6 +1,8 @@
 package com.scalableratelimiter.app.ratelimit;
 
 import com.sun.net.httpserver.HttpServer;
+import io.github.resilience4j.bulkhead.Bulkhead;
+import io.github.resilience4j.bulkhead.BulkheadConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import org.junit.jupiter.api.AfterEach;
@@ -15,6 +17,7 @@ import org.springframework.web.client.RestClient;
 
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
+import java.util.UUID;
 import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -40,7 +43,8 @@ class RateLimitClientTest {
     void setUp() {
         restClientBuilder = RestClient.builder();
         rateLimiterServer = MockRestServiceServer.bindTo(restClientBuilder).build();
-        rateLimitClient = new RateLimitClient(restClientBuilder, BASE_URL, permissiveCircuitBreaker());
+        rateLimitClient = new RateLimitClient(restClientBuilder, BASE_URL,
+                permissiveCircuitBreaker(), permissiveBulkhead());
     }
 
     @AfterEach
@@ -171,14 +175,22 @@ class RateLimitClientTest {
                 .build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(readTimeout);
-        return new RateLimitClient(RestClient.builder().requestFactory(requestFactory), baseUrl, permissiveCircuitBreaker());
+        return new RateLimitClient(RestClient.builder().requestFactory(requestFactory), baseUrl,
+                permissiveCircuitBreaker(), permissiveBulkhead());
     }
 
     static CircuitBreaker permissiveCircuitBreaker() {
-        return CircuitBreaker.of("rate-limiter-test-permissive", CircuitBreakerConfig.custom()
+        return CircuitBreaker.of("cb-permissive-" + UUID.randomUUID(), CircuitBreakerConfig.custom()
                 .failureRateThreshold(100)
                 .minimumNumberOfCalls(1_000)
                 .slidingWindowSize(100)
+                .build());
+    }
+
+    static Bulkhead permissiveBulkhead() {
+        return Bulkhead.of("bulkhead-permissive-" + UUID.randomUUID(), BulkheadConfig.custom()
+                .maxConcurrentCalls(1_000)
+                .maxWaitDuration(Duration.ZERO)
                 .build());
     }
 }

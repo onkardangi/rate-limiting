@@ -1,5 +1,6 @@
 package com.scalableratelimiter.app.config;
 
+import io.github.resilience4j.bulkhead.Bulkhead;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,7 +21,13 @@ class RateLimiterClientConfigTest {
     private RateLimiterCircuitBreakerProperties circuitBreakerProperties;
 
     @Autowired
+    private RateLimiterBulkheadProperties bulkheadProperties;
+
+    @Autowired
     private CircuitBreaker rateLimiterCircuitBreaker;
+
+    @Autowired
+    private Bulkhead rateLimiterBulkhead;
 
     @Test
     void configuresRateLimiterClientTimeoutsFromProperties() {
@@ -36,5 +43,12 @@ class RateLimiterClientConfigTest {
         assertEquals(Duration.ofSeconds(10), circuitBreakerProperties.waitDurationInOpenState());
         assertEquals(3, circuitBreakerProperties.permittedCallsInHalfOpenState());
         assertNotNull(rateLimiterCircuitBreaker);
+    }
+
+    @Test
+    void configuresBulkheadFromProperties() {
+        assertEquals(10, bulkheadProperties.maxConcurrentCalls());
+        assertEquals(Duration.ZERO, bulkheadProperties.maxWaitDuration());
+        assertNotNull(rateLimiterBulkhead);
     }
 }

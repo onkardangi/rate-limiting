@@ -31,13 +31,13 @@ Problems drive the design. Infrastructure and abstractions are introduced only w
 
 ## Current State
 
-**Phase 8 — Circuit Breaker for Rate Limiter Dependency**
+**Phase 9 — Bulkhead for Rate Limiter Concurrency**
 
-A Maven multi-module project with a Resilience4j circuit breaker around the app-service → rate-limiter-service HTTP call:
+A Maven multi-module project with a Resilience4j circuit breaker and semaphore bulkhead around the app-service → rate-limiter-service HTTP call:
 
 | Module | Port | Responsibility |
 |--------|------|----------------|
-| `app-service` | 8080 | Product API; circuit breaker + timeouts; fails open when limiter unavailable |
+| `app-service` | 8080 | Product API; circuit breaker + bulkhead + timeouts; fails open when limiter unavailable |
 | `rate-limiter-service` | 8081 | Fixed-window rate limiting; atomic counters in Redis |
 | Redis | 6379 | Shared ephemeral counters for all rate-limiter instances |
 
@@ -174,21 +174,49 @@ rate-limiter.circuit-breaker.wait-duration-in-open-state=10s
 rate-limiter.circuit-breaker.permitted-calls-in-half-open-state=3
 ```
 
-## Known Limitations
+### Important limitation
 
-### Concurrent load while dependency is slow
-
-Even with timeouts and a circuit breaker, many concurrent requests can consume threads and connections while the rate-limiter is slow but has not yet tripped the circuit.
+Even with timeouts and a circuit breaker, many concurrent requests could consume threads and connections while the rate-limiter was slow but still accepting traffic.
 
 **Next question:** How much concurrent work should we allow toward the rate-limiter dependency?
 
-### Redis availability
+## Phase 9 — Bulkhead for Rate Limiter Concurrency
 
-The rate-limiter service depends on Redis. No retries or circuit breakers have been added.
+### The problem
+
+Phase 8 stopped repeated calls to a known-unhealthy dependency, but a slow dependency could still accumulate unbounded in-flight calls while the circuit breaker remained `CLOSED`.
+
+### The solution
+
+Add a semaphore bulkhead inside the circuit breaker:
+
+```
+RateLimitFilter -> RateLimitClient -> Circuit Breaker -> Bulkhead -> HTTP call
+```
+
+- Cap concurrent in-flight rate-limiter calls
+- Reject immediately when capacity is exhausted (`max-wait-duration=0`)
+- Bulkhead rejection maps to `UNAVAILABLE` → fail open
+- Bulkhead rejection does not count as a remote circuit-breaker failure
+
+### Configuration (tune per environment)
+
+```properties
+rate-limiter.bulkhead.max-concurrent-calls=10
+rate-limiter.bulkhead.max-wait-duration=0ms
+```
+
+## Known Limitations
 
 ### Fixed-window boundary bursts
 
-A user can send 100 requests at the end of one minute and another 100 immediately at the beginning of the next minute.
+A user can send 100 requests at the end of one minute and another 100 immediately at the beginning of the next minute — roughly 200 requests in about one second.
+
+**Next question:** Does our rate-limit algorithm actually provide the traffic-shaping behavior the product wants?
+
+### Redis availability
+
+The rate-limiter service depends on Redis. No retries have been added at the Redis layer.
 
 ### Caller identity
 
@@ -204,11 +232,11 @@ Client
   v
 app-service (:8080)
   |
-  +--> Rate Limit Filter (X-User-Id validation, HTTP check)
+  +--> Rate Limit Filter (X-User-Id validation, circuit breaker, bulkhead, HTTP check)
   |
   +--> Product Endpoint
   |
-  v (HTTP)
+  v (HTTP, circuit breaker → bulkhead)
 rate-limiter-service (:8081)
   |
   v
@@ -219,7 +247,7 @@ Redis (Lua: INCR + conditional EXPIRE on rate-limit:{userId}:{windowMinute})
 
 Future phases may explore:
 
-- Bulkheads / concurrency limits toward the rate-limiter
+- Rate-limit algorithm improvements (sliding window, token bucket)
 - Observability and metrics
 - Load testing
 
