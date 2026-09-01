@@ -3,46 +3,34 @@ package com.scalableratelimiter.ratelimiter.ratelimit;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.temporal.ChronoUnit;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class RateLimiterService {
 
     static final int MAX_REQUESTS_PER_MINUTE = 100;
+    static final Duration WINDOW_KEY_TTL = Duration.ofMinutes(2);
+    static final String KEY_PREFIX = "rate-limit:";
 
     private final Clock clock;
-    private final ConcurrentHashMap<String, UserWindowState> userState = new ConcurrentHashMap<>();
+    private final RateLimitStateStore stateStore;
 
-    public RateLimiterService(Clock clock) {
+    public RateLimiterService(Clock clock, RateLimitStateStore stateStore) {
         this.clock = clock;
+        this.stateStore = stateStore;
     }
 
-    /**
-     * The rate-limit invariant spans both the current window and the count.
-     * A plain thread-safe map is not enough: the read-inspect-increment transition
-     * must be atomic per user so concurrent requests cannot observe stale state.
-     */
     public boolean allowRequest(String userId) {
         long currentWindow = currentWindowMinute();
-        boolean[] allowed = new boolean[1];
+        String key = buildKey(userId, currentWindow);
 
-        userState.compute(userId, (key, state) -> {
-            if (state == null || state.windowMinute() != currentWindow) {
-                allowed[0] = true;
-                return new UserWindowState(currentWindow, 1);
-            }
+        long count = stateStore.increment(key, WINDOW_KEY_TTL);
+        return count <= MAX_REQUESTS_PER_MINUTE;
+    }
 
-            if (state.count() >= MAX_REQUESTS_PER_MINUTE) {
-                allowed[0] = false;
-                return state;
-            }
-
-            allowed[0] = true;
-            return new UserWindowState(currentWindow, state.count() + 1);
-        });
-
-        return allowed[0];
+    static String buildKey(String userId, long windowMinute) {
+        return KEY_PREFIX + userId + ":" + windowMinute;
     }
 
     private long currentWindowMinute() {

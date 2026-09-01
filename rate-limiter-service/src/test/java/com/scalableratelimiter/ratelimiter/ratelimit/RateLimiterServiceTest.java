@@ -17,12 +17,14 @@ class RateLimiterServiceTest {
     private static final Instant MINUTE_N_PLUS_ONE = Instant.parse("2026-08-31T12:01:00Z");
 
     private Clock clock;
+    private InMemoryRateLimitStateStore stateStore;
     private RateLimiterService rateLimiterService;
 
     @BeforeEach
     void setUp() {
         clock = Clock.fixed(MINUTE_N_START, ZoneOffset.UTC);
-        rateLimiterService = new RateLimiterService(clock);
+        stateStore = new InMemoryRateLimitStateStore(clock);
+        rateLimiterService = new RateLimiterService(clock, stateStore);
     }
 
     @Test
@@ -65,7 +67,8 @@ class RateLimiterServiceTest {
         assertFalse(rateLimiterService.allowRequest("alice"));
 
         clock = Clock.fixed(MINUTE_N_PLUS_ONE, ZoneOffset.UTC);
-        rateLimiterService = new RateLimiterService(clock);
+        stateStore = new InMemoryRateLimitStateStore(clock);
+        rateLimiterService = new RateLimiterService(clock, stateStore);
 
         assertTrue(rateLimiterService.allowRequest("alice"));
     }
@@ -78,7 +81,8 @@ class RateLimiterServiceTest {
     @Test
     void fixedWindowBoundary_allowsBurstAcrossMinuteBoundary() {
         clock = Clock.fixed(MINUTE_N_END, ZoneOffset.UTC);
-        rateLimiterService = new RateLimiterService(clock);
+        stateStore = new InMemoryRateLimitStateStore(clock);
+        rateLimiterService = new RateLimiterService(clock, stateStore);
 
         for (int i = 0; i < RateLimiterService.MAX_REQUESTS_PER_MINUTE; i++) {
             assertTrue(rateLimiterService.allowRequest("alice"));
@@ -86,7 +90,8 @@ class RateLimiterServiceTest {
         assertFalse(rateLimiterService.allowRequest("alice"));
 
         clock = Clock.fixed(MINUTE_N_PLUS_ONE, ZoneOffset.UTC);
-        rateLimiterService = new RateLimiterService(clock);
+        stateStore = new InMemoryRateLimitStateStore(clock);
+        rateLimiterService = new RateLimiterService(clock, stateStore);
 
         for (int i = 0; i < RateLimiterService.MAX_REQUESTS_PER_MINUTE; i++) {
             assertTrue(rateLimiterService.allowRequest("alice"));

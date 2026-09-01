@@ -35,3 +35,6 @@ What limitations remain?
 | [ADR-001](ADR-001-in-memory-fixed-window.md) | In-Memory Fixed-Window Rate Limiter |
 | [ADR-002](ADR-002-concurrency-safe-per-user-updates.md) | Concurrency-Safe Per-User Updates |
 | [ADR-003](ADR-003-dedicated-rate-limiter-service.md) | Dedicated Rate Limiter Service |
+| [ADR-004](ADR-004-redis-shared-rate-limit-state.md) | Redis Shared Rate-Limit State |
+| [ADR-005](ADR-005-atomic-redis-counter-with-incr.md) | Atomic Redis Counter with INCR |
+| [ADR-006](ADR-006-atomic-counter-and-expiration-with-lua.md) | Atomic Counter and Expiration with Lua |

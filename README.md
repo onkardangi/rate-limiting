@@ -31,14 +31,15 @@ Problems drive the design. Infrastructure and abstractions are introduced only w
 
 ## Current State
 
-**Phase 3 — Dedicated Rate Limiter Service**
+**Phase 5B — Atomic Counter and Expiration with Lua**
 
-A Maven multi-module project with two services:
+A Maven multi-module project with Redis-backed rate-limit state using an atomic Lua script for increment + TTL:
 
 | Module | Port | Responsibility |
 |--------|------|----------------|
 | `app-service` | 8080 | Product API; delegates rate-limit checks over HTTP |
-| `rate-limiter-service` | 8081 | Fixed-window rate limiting; owns in-memory state |
+| `rate-limiter-service` | 8081 | Fixed-window rate limiting; atomic counters in Redis |
+| Redis | 6379 | Shared ephemeral counters for all rate-limiter instances |
 
 | Endpoint | Service | Description |
 |----------|---------|-------------|
@@ -51,68 +52,73 @@ All requests to `/api/products/*` require the `X-User-Id` header.
 
 We started with one application instance. Rate-limit state lived in application memory.
 
-Each user receives **100 requests per fixed calendar minute**. Request 101 within the same minute returns HTTP 429. The implementation uses a fixed-window counter: one counter per user, reset when the calendar minute changes.
+Each user receives **100 requests per fixed calendar minute**. Request 101 within the same minute returns HTTP 429.
 
 ## Phase 2 — Concurrency Safety
 
-Phase 1's plain `HashMap` allowed read-modify-write races under concurrent requests. The fix was `ConcurrentHashMap.compute(...)` to make the entire state transition atomic per user key.
+Phase 1's plain `HashMap` allowed read-modify-write races under concurrent requests. The fix was `ConcurrentHashMap.compute(...)` to make the entire state transition atomic per user key within one JVM.
 
 ## Phase 3 — Dedicated Rate Limiter Service
 
+Rate limiting was extracted into a dedicated service so multiple application instances could share one logical limiter. State remained in-memory inside the rate-limiter service.
+
+## Phase 4 — Redis Shared State
+
+Rate-limit state moved to Redis so multiple rate-limiter instances could observe the same counters. Updates intentionally used GET → inspect → SET, which still allowed lost updates across instances.
+
+## Phase 5A — Atomic Redis Counter with INCR
+
+Redis `INCR` fixed distributed lost-update races. However, `INCR` and `EXPIRE` were still separate commands — a crash between them could leave a key without TTL.
+
+## Phase 5B — Atomic Counter and Expiration with Lua
+
 ### The problem
 
-Phase 2 is correct within one JVM, but if multiple application servers each own rate-limit state, counters fragment. A user could exceed the limit by spreading requests across instances.
+Phase 5A could leave permanent keys in Redis:
+
+```
+INCR creates key
+service crashes
+EXPIRE never runs
+key has no TTL
+```
 
 ### The solution
 
-Extract rate limiting into a dedicated service. Application instances call it over HTTP before serving protected requests. Rate-limit state remains in-memory inside the rate-limiter service for now.
+Execute `INCR` and conditional `EXPIRE` inside one Redis Lua script. Redis runs the script atomically on the server. The `RateLimitStateStore.increment(...)` contract is unchanged.
 
-```
-Client
-  |
-  v
-Application Service (app-service)
-  |
-  +--> POST /api/rate-limit/check (HTTP)
-  |
-  v
-Rate Limiter Service (rate-limiter-service)
-  |
-  v
-in-memory ConcurrentHashMap
+```lua
+count = INCR key
+if count == 1 then
+  EXPIRE key ttl
+end
+return count
 ```
 
-### Why this design
+### Why Lua
 
-- Centralizes rate-limit logic and state
-- Multiple app instances can share one logical limiter
-- Policy can evolve independently of application code
-- No shared datastore yet — we have not demonstrated the need to scale the rate-limiter service itself
+- Correctness spans multiple Redis commands
+- Moving the operation server-side removes the client-side crash gap
+- No distributed lock is required
+- `RateLimiterService` stays unaware of Redis details
 
-### Trade-offs accepted
+### What is now solved
 
-- Extra network hop per protected request
-- Rate-limiter service is an availability dependency
-- Single rate-limiter instance is a bottleneck and single point of failure
-- In-memory state still prevents horizontally scaling the rate-limiter service
+Distributed counter correctness for this fixed-window design: increment and initial TTL assignment are atomic as one operation.
 
 ## Known Limitations
 
-### Shared state across rate-limiter instances
+### Redis availability
 
-The rate-limiter service still holds state in memory. Multiple rate-limiter instances would each maintain independent counters. The next problem to solve: **how can multiple rate-limiter service instances share the same rate-limit state?**
+The rate-limiter service depends on Redis. No retries, circuit breakers, or fail-open/fail-closed policy have been defined.
+
+### Rate-limiter service availability
+
+The application service depends on the rate-limiter service over HTTP.
 
 ### Fixed-window boundary bursts
 
 A user can send 100 requests at the end of one minute and another 100 immediately at the beginning of the next minute.
-
-### Process restart
-
-Restarting the rate-limiter service loses all rate-limit state.
-
-### Network dependency
-
-The application service depends on the rate-limiter service being available. No retries or circuit breakers have been added.
 
 ### Caller identity
 
@@ -136,16 +142,15 @@ app-service (:8080)
 rate-limiter-service (:8081)
   |
   v
-ConcurrentHashMap (per-user window + count)
+Redis (Lua: INCR + conditional EXPIRE on rate-limit:{userId}:{windowMinute})
 ```
 
 ## Planned Evolution
 
 Future phases may explore:
 
-- Shared state across rate-limiter instances
-- Failure handling
-- Horizontal scaling
+- Redis timeout and failure handling
+- Fail-open vs fail-closed policy
 - Observability
 - Load testing
 
@@ -159,6 +164,7 @@ Design decisions are documented in [`docs/decisions/`](docs/decisions/).
 
 - Java 21
 - Maven 3.9+
+- Docker (for local Redis via Docker Compose)
 
 ## Build and Run
 
@@ -166,6 +172,12 @@ Build all modules:
 
 ```bash
 mvn clean package
+```
+
+Start Redis:
+
+```bash
+docker compose up -d
 ```
 
 Start the rate-limiter service (port 8081):
@@ -181,6 +193,8 @@ java -jar app-service/target/app-service-0.1.0-SNAPSHOT.jar
 ```
 
 ## Test
+
+Tests use an in-memory state store and do not require a running Redis instance:
 
 ```bash
 mvn test
