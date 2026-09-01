@@ -31,22 +31,24 @@ Problems drive the design. Infrastructure and abstractions are introduced only w
 
 ## Current State
 
-**Phase 5B — Atomic Counter and Expiration with Lua**
+**Phase 7 — Bounded Rate Limiter Wait Time**
 
-A Maven multi-module project with Redis-backed rate-limit state using an atomic Lua script for increment + TTL:
+A Maven multi-module project with bounded HTTP timeouts between app-service and rate-limiter-service:
 
 | Module | Port | Responsibility |
 |--------|------|----------------|
-| `app-service` | 8080 | Product API; delegates rate-limit checks over HTTP |
+| `app-service` | 8080 | Product API; calls rate limiter with configured timeouts; fails open on timeout |
 | `rate-limiter-service` | 8081 | Fixed-window rate limiting; atomic counters in Redis |
 | Redis | 6379 | Shared ephemeral counters for all rate-limiter instances |
 
 | Endpoint | Service | Description |
 |----------|---------|-------------|
-| `GET /api/products/{id}` | app-service | Returns a hardcoded product response (rate limited) |
+| `GET /api/products/{id}` | app-service | Returns a hardcoded product response (rate limited; fails open on limiter timeout) |
 | `POST /api/rate-limit/check` | rate-limiter-service | Internal rate-limit check |
 
 All requests to `/api/products/*` require the `X-User-Id` header.
+
+Rate-limit decisions: `ALLOWED`, `RATE_LIMITED`, `UNAVAILABLE`.
 
 ## Phase 1 — Fixed Window
 
@@ -106,15 +108,47 @@ return count
 
 Distributed counter correctness for this fixed-window design: increment and initial TTL assignment are atomic as one operation.
 
+## Phase 6 — Fail Open on Rate Limiter Unavailability
+
+When the rate limiter cannot produce a decision (for example, Redis failure), it returns `UNAVAILABLE`. For `GET /api/products/{id}`, app-service fails open and serves the product. A warning is logged so operators can distinguish outage-driven allows from normal allows.
+
+## Phase 7 — Bounded Rate Limiter Wait Time
+
+### The problem
+
+Fail-open only helps after unavailability is detected. A slow rate limiter can block the application indefinitely if there is no timeout.
+
+### The solution
+
+Configure explicit HTTP client timeouts on the app-service → rate-limiter-service call:
+
+```properties
+rate-limiter.client.connection-timeout=500ms
+rate-limiter.client.read-timeout=1s
+```
+
+- **Connection timeout** — how long to wait to establish a connection
+- **Read timeout** — how long to wait for a response
+
+When a timeout occurs, `RateLimitClient` returns `UNAVAILABLE` and the existing fail-open policy continues the product request.
+
+Production timeout values should be derived from latency SLOs and observed percentile latency, not treated as universal constants.
+
+### Important limitation
+
+Even with timeouts, every request still attempts to call an unhealthy rate-limiter service during sustained outages.
+
+**Next question:** Should we keep calling a dependency we already know is unhealthy?
+
 ## Known Limitations
+
+### Repeated calls to unhealthy dependencies
+
+Timeouts bound wait time, but app-service still calls the rate-limiter on every request. No circuit breaker has been added.
 
 ### Redis availability
 
-The rate-limiter service depends on Redis. No retries, circuit breakers, or fail-open/fail-closed policy have been defined.
-
-### Rate-limiter service availability
-
-The application service depends on the rate-limiter service over HTTP.
+The rate-limiter service depends on Redis. No retries or circuit breakers have been added.
 
 ### Fixed-window boundary bursts
 
@@ -149,9 +183,8 @@ Redis (Lua: INCR + conditional EXPIRE on rate-limit:{userId}:{windowMinute})
 
 Future phases may explore:
 
-- Redis timeout and failure handling
-- Fail-open vs fail-closed policy
-- Observability
+- Circuit breaking for unhealthy dependencies
+- Observability and timeout metrics
 - Load testing
 
 Specific technologies and solutions will be chosen as problems emerge during development.

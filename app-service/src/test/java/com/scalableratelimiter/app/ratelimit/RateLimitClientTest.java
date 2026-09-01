@@ -1,14 +1,23 @@
 package com.scalableratelimiter.app.ratelimit;
 
+import com.scalableratelimiter.app.config.RateLimiterClientProperties;
+import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import java.net.InetSocketAddress;
+import java.net.http.HttpClient;
+import java.time.Duration;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -24,12 +33,21 @@ class RateLimitClientTest {
     private RestClient.Builder restClientBuilder;
     private MockRestServiceServer rateLimiterServer;
     private RateLimitClient rateLimitClient;
+    private HttpServer slowServer;
 
     @BeforeEach
     void setUp() {
         restClientBuilder = RestClient.builder();
         rateLimiterServer = MockRestServiceServer.bindTo(restClientBuilder).build();
         rateLimitClient = new RateLimitClient(restClientBuilder, BASE_URL);
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (slowServer != null) {
+            slowServer.stop(0);
+            slowServer = null;
+        }
     }
 
     @Test
@@ -76,5 +94,82 @@ class RateLimitClientTest {
 
         assertEquals(RateLimitDecision.UNAVAILABLE, rateLimitClient.checkRateLimit("alice"));
         rateLimiterServer.verify();
+    }
+
+    @Test
+    void checkRateLimit_returnsUnavailable_onConnectionTimeout() {
+        RateLimitClient client = clientWithTimeouts(
+                Duration.ofMillis(50),
+                Duration.ofSeconds(1),
+                "http://127.0.0.1:1");
+
+        RateLimitDecision decision = client.checkRateLimit("alice");
+
+        assertEquals(RateLimitDecision.UNAVAILABLE, decision);
+        assertNotEquals(RateLimitDecision.ALLOWED, decision);
+        assertNotEquals(RateLimitDecision.RATE_LIMITED, decision);
+    }
+
+    @Test
+    void checkRateLimit_returnsUnavailable_onReadTimeout() throws Exception {
+        slowServer = HttpServer.create(new InetSocketAddress(0), 0);
+        slowServer.createContext("/api/rate-limit/check", exchange -> {
+            try {
+                Thread.sleep(2_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            byte[] response = "{\"decision\":\"ALLOWED\"}".getBytes();
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        slowServer.start();
+
+        String baseUrl = "http://localhost:" + slowServer.getAddress().getPort();
+        RateLimitClient client = clientWithTimeouts(
+                Duration.ofSeconds(1),
+                Duration.ofMillis(100),
+                baseUrl);
+
+        RateLimitDecision decision = client.checkRateLimit("alice");
+
+        assertEquals(RateLimitDecision.UNAVAILABLE, decision);
+        assertNotEquals(RateLimitDecision.ALLOWED, decision);
+        assertNotEquals(RateLimitDecision.RATE_LIMITED, decision);
+    }
+
+    @Test
+    void checkRateLimit_doesNotReturnRateLimited_onTimeout() {
+        RateLimitClient client = clientWithTimeouts(
+                Duration.ofMillis(50),
+                Duration.ofMillis(50),
+                "http://127.0.0.1:1");
+
+        assertNotEquals(RateLimitDecision.RATE_LIMITED, client.checkRateLimit("alice"));
+    }
+
+    @Test
+    void checkRateLimit_doesNotReturnAllowed_onTimeout() {
+        RateLimitClient client = clientWithTimeouts(
+                Duration.ofMillis(50),
+                Duration.ofMillis(50),
+                "http://127.0.0.1:1");
+
+        assertNotEquals(RateLimitDecision.ALLOWED, client.checkRateLimit("alice"));
+    }
+
+    private static RateLimitClient clientWithTimeouts(
+            Duration connectionTimeout,
+            Duration readTimeout,
+            String baseUrl) {
+        HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(connectionTimeout)
+                .build();
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
+        requestFactory.setReadTimeout(readTimeout);
+        return new RateLimitClient(RestClient.builder().requestFactory(requestFactory), baseUrl);
     }
 }
