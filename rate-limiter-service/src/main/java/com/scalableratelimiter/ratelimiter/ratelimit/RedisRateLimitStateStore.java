@@ -23,16 +23,23 @@ public class RedisRateLimitStateStore implements RateLimitStateStore {
 
     @Override
     public long increment(String key, Duration ttl) {
-        Long count = redisTemplate.execute(
-                incrementWithTtlScript,
-                List.of(key),
-                String.valueOf(ttl.toSeconds()));
+        try {
+            Long count = redisTemplate.execute(
+                    incrementWithTtlScript,
+                    List.of(key),
+                    String.valueOf(ttl.toSeconds()));
 
-        if (count == null) {
-            throw new IllegalStateException("Redis increment script returned null for key: " + key);
+            if (count == null) {
+                throw new RateLimitStateStoreException(
+                        "Redis increment script returned null for key: " + key);
+            }
+
+            return count;
+        } catch (RateLimitStateStoreException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new RateLimitStateStoreException("Redis increment failed for key: " + key, e);
         }
-
-        return count;
     }
 
     DefaultRedisScript<Long> incrementWithTtlScript() {

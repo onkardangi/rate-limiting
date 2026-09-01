@@ -21,12 +21,18 @@ public class RateLimiterService {
         this.stateStore = stateStore;
     }
 
-    public boolean allowRequest(String userId) {
-        long currentWindow = currentWindowMinute();
-        String key = buildKey(userId, currentWindow);
+    public RateLimitDecision checkRequest(String userId) {
+        try {
+            long currentWindow = currentWindowMinute();
+            String key = buildKey(userId, currentWindow);
 
-        long count = stateStore.increment(key, WINDOW_KEY_TTL);
-        return count <= MAX_REQUESTS_PER_MINUTE;
+            long count = stateStore.increment(key, WINDOW_KEY_TTL);
+            return count <= MAX_REQUESTS_PER_MINUTE
+                    ? RateLimitDecision.ALLOWED
+                    : RateLimitDecision.RATE_LIMITED;
+        } catch (RateLimitStateStoreException e) {
+            return RateLimitDecision.UNAVAILABLE;
+        }
     }
 
     static String buildKey(String userId, long windowMinute) {

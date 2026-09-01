@@ -7,8 +7,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class RateLimiterServiceTest {
 
@@ -29,13 +28,13 @@ class RateLimiterServiceTest {
 
     @Test
     void firstRequestFromUser_isAllowed() {
-        assertTrue(rateLimiterService.allowRequest("alice"));
+        assertEquals(RateLimitDecision.ALLOWED, rateLimiterService.checkRequest("alice"));
     }
 
     @Test
     void requestsOneThroughOneHundred_areAllowed() {
         for (int i = 0; i < RateLimiterService.MAX_REQUESTS_PER_MINUTE; i++) {
-            assertTrue(rateLimiterService.allowRequest("alice"),
+            assertEquals(RateLimitDecision.ALLOWED, rateLimiterService.checkRequest("alice"),
                     "Request " + (i + 1) + " should be allowed");
         }
     }
@@ -43,34 +42,34 @@ class RateLimiterServiceTest {
     @Test
     void requestOneHundredAndOne_inSameMinute_isRejected() {
         for (int i = 0; i < RateLimiterService.MAX_REQUESTS_PER_MINUTE; i++) {
-            rateLimiterService.allowRequest("alice");
+            rateLimiterService.checkRequest("alice");
         }
 
-        assertFalse(rateLimiterService.allowRequest("alice"));
+        assertEquals(RateLimitDecision.RATE_LIMITED, rateLimiterService.checkRequest("alice"));
     }
 
     @Test
     void differentUsers_haveIndependentCounters() {
         for (int i = 0; i < RateLimiterService.MAX_REQUESTS_PER_MINUTE; i++) {
-            rateLimiterService.allowRequest("alice");
+            rateLimiterService.checkRequest("alice");
         }
 
-        assertFalse(rateLimiterService.allowRequest("alice"));
-        assertTrue(rateLimiterService.allowRequest("bob"));
+        assertEquals(RateLimitDecision.RATE_LIMITED, rateLimiterService.checkRequest("alice"));
+        assertEquals(RateLimitDecision.ALLOWED, rateLimiterService.checkRequest("bob"));
     }
 
     @Test
     void afterMovingToNextMinute_userIsAllowedAgain() {
         for (int i = 0; i < RateLimiterService.MAX_REQUESTS_PER_MINUTE; i++) {
-            rateLimiterService.allowRequest("alice");
+            rateLimiterService.checkRequest("alice");
         }
-        assertFalse(rateLimiterService.allowRequest("alice"));
+        assertEquals(RateLimitDecision.RATE_LIMITED, rateLimiterService.checkRequest("alice"));
 
         clock = Clock.fixed(MINUTE_N_PLUS_ONE, ZoneOffset.UTC);
         stateStore = new InMemoryRateLimitStateStore(clock);
         rateLimiterService = new RateLimiterService(clock, stateStore);
 
-        assertTrue(rateLimiterService.allowRequest("alice"));
+        assertEquals(RateLimitDecision.ALLOWED, rateLimiterService.checkRequest("alice"));
     }
 
     /**
@@ -85,17 +84,17 @@ class RateLimiterServiceTest {
         rateLimiterService = new RateLimiterService(clock, stateStore);
 
         for (int i = 0; i < RateLimiterService.MAX_REQUESTS_PER_MINUTE; i++) {
-            assertTrue(rateLimiterService.allowRequest("alice"));
+            assertEquals(RateLimitDecision.ALLOWED, rateLimiterService.checkRequest("alice"));
         }
-        assertFalse(rateLimiterService.allowRequest("alice"));
+        assertEquals(RateLimitDecision.RATE_LIMITED, rateLimiterService.checkRequest("alice"));
 
         clock = Clock.fixed(MINUTE_N_PLUS_ONE, ZoneOffset.UTC);
         stateStore = new InMemoryRateLimitStateStore(clock);
         rateLimiterService = new RateLimiterService(clock, stateStore);
 
         for (int i = 0; i < RateLimiterService.MAX_REQUESTS_PER_MINUTE; i++) {
-            assertTrue(rateLimiterService.allowRequest("alice"));
+            assertEquals(RateLimitDecision.ALLOWED, rateLimiterService.checkRequest("alice"));
         }
-        assertFalse(rateLimiterService.allowRequest("alice"));
+        assertEquals(RateLimitDecision.RATE_LIMITED, rateLimiterService.checkRequest("alice"));
     }
 }

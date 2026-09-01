@@ -1,5 +1,6 @@
 package com.scalableratelimiter.app.product;
 
+import com.scalableratelimiter.app.ratelimit.RateLimitDecision;
 import com.scalableratelimiter.app.ratelimit.RateLimitClient;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,7 +27,7 @@ class ProductControllerTest {
 
     @Test
     void getProduct_returnsExpectedResponse_whenRateLimiterAllows() throws Exception {
-        when(rateLimitClient.checkRateLimit("alice")).thenReturn(true);
+        when(rateLimitClient.checkRateLimit("alice")).thenReturn(RateLimitDecision.ALLOWED);
 
         mockMvc.perform(get("/api/products/123")
                         .header("X-User-Id", "alice"))

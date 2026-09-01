@@ -45,7 +45,7 @@ class RateLimitFilterTest {
 
     @Test
     void allowedRequest_reachesProductEndpoint() throws Exception {
-        when(rateLimitClient.checkRateLimit("alice")).thenReturn(true);
+        when(rateLimitClient.checkRateLimit("alice")).thenReturn(RateLimitDecision.ALLOWED);
 
         mockMvc.perform(get("/api/products/123")
                         .header(RateLimitFilter.USER_ID_HEADER, "alice"))
@@ -58,7 +58,7 @@ class RateLimitFilterTest {
 
     @Test
     void rateLimitedRequest_returnsTooManyRequests() throws Exception {
-        when(rateLimitClient.checkRateLimit("alice")).thenReturn(false);
+        when(rateLimitClient.checkRateLimit("alice")).thenReturn(RateLimitDecision.RATE_LIMITED);
 
         mockMvc.perform(get("/api/products/123")
                         .header(RateLimitFilter.USER_ID_HEADER, "alice"))
@@ -70,7 +70,7 @@ class RateLimitFilterTest {
 
     @Test
     void rateLimitedRequest_doesNotReachProductEndpoint() throws Exception {
-        when(rateLimitClient.checkRateLimit("alice")).thenReturn(false);
+        when(rateLimitClient.checkRateLimit("alice")).thenReturn(RateLimitDecision.RATE_LIMITED);
 
         mockMvc.perform(get("/api/products/123")
                         .header(RateLimitFilter.USER_ID_HEADER, "alice"))
@@ -80,5 +80,29 @@ class RateLimitFilterTest {
                 .andExpect(jsonPath("$.name").doesNotExist());
 
         verify(rateLimitClient).checkRateLimit("alice");
+    }
+
+    @Test
+    void unavailableRequest_reachesProductEndpoint() throws Exception {
+        when(rateLimitClient.checkRateLimit("alice")).thenReturn(RateLimitDecision.UNAVAILABLE);
+
+        mockMvc.perform(get("/api/products/123")
+                        .header(RateLimitFilter.USER_ID_HEADER, "alice"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("123"))
+                .andExpect(jsonPath("$.name").value("Example Product"));
+
+        verify(rateLimitClient).checkRateLimit("alice");
+    }
+
+    @Test
+    void unavailableRequest_executesProductBehavior() throws Exception {
+        when(rateLimitClient.checkRateLimit("alice")).thenReturn(RateLimitDecision.UNAVAILABLE);
+
+        mockMvc.perform(get("/api/products/456")
+                        .header(RateLimitFilter.USER_ID_HEADER, "alice"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("456"))
+                .andExpect(jsonPath("$.name").value("Example Product"));
     }
 }

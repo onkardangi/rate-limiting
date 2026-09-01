@@ -1,4 +1,4 @@
 package com.scalableratelimiter.app.ratelimit;
 
-public record RateLimitCheckResponse(boolean allowed) {
+public record RateLimitCheckResponse(RateLimitDecision decision) {
 }

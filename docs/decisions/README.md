@@ -38,3 +38,4 @@ What limitations remain?
 | [ADR-004](ADR-004-redis-shared-rate-limit-state.md) | Redis Shared Rate-Limit State |
 | [ADR-005](ADR-005-atomic-redis-counter-with-incr.md) | Atomic Redis Counter with INCR |
 | [ADR-006](ADR-006-atomic-counter-and-expiration-with-lua.md) | Atomic Counter and Expiration with Lua |
+| [ADR-007](ADR-007-fail-open-rate-limiter-unavailability.md) | Fail Open on Rate Limiter Unavailability |

@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -94,5 +95,29 @@ class RedisRateLimitStateStoreTest {
         verify(redisTemplate, never()).expire(org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.any(Duration.class));
         verify(redisTemplate, never()).opsForValue();
+    }
+
+    @Test
+    void increment_wrapsRedisFailureInStateStoreException() {
+        when(redisTemplate.execute(
+                org.mockito.ArgumentMatchers.any(DefaultRedisScript.class),
+                org.mockito.ArgumentMatchers.anyList(),
+                org.mockito.ArgumentMatchers.anyString()))
+                .thenThrow(new RuntimeException("connection refused"));
+
+        assertThrows(RateLimitStateStoreException.class,
+                () -> stateStore.increment("rate-limit:alice:123", Duration.ofMinutes(2)));
+    }
+
+    @Test
+    void increment_wrapsNullScriptResultInStateStoreException() {
+        when(redisTemplate.execute(
+                org.mockito.ArgumentMatchers.any(DefaultRedisScript.class),
+                org.mockito.ArgumentMatchers.anyList(),
+                org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(null);
+
+        assertThrows(RateLimitStateStoreException.class,
+                () -> stateStore.increment("rate-limit:alice:123", Duration.ofMinutes(2)));
     }
 }

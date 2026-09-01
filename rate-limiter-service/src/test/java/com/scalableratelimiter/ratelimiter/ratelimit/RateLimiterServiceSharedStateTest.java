@@ -16,7 +16,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RateLimiterServiceSharedStateTest {
@@ -39,10 +38,10 @@ class RateLimiterServiceSharedStateTest {
         RateLimiterService serviceB = new RateLimiterService(clock, stateStore);
 
         for (int i = 0; i < RateLimiterService.MAX_REQUESTS_PER_MINUTE; i++) {
-            assertTrue(serviceA.allowRequest("alice"));
+            assertEquals(RateLimitDecision.ALLOWED, serviceA.checkRequest("alice"));
         }
 
-        assertFalse(serviceB.allowRequest("alice"));
+        assertEquals(RateLimitDecision.RATE_LIMITED, serviceB.checkRequest("alice"));
     }
 
     @Test
@@ -111,7 +110,7 @@ class RateLimiterServiceSharedStateTest {
                 try {
                     barrier.await();
                     for (int request = 0; request < requestsPerThread; request++) {
-                        if (service.allowRequest("alice")) {
+                        if (service.checkRequest("alice") == RateLimitDecision.ALLOWED) {
                             allowedCount.incrementAndGet();
                         }
                     }
@@ -134,15 +133,15 @@ class RateLimiterServiceSharedStateTest {
         RateLimiterService service = new RateLimiterService(clock, stateStore);
 
         for (int i = 0; i < RateLimiterService.MAX_REQUESTS_PER_MINUTE; i++) {
-            assertTrue(service.allowRequest("alice"));
+            assertEquals(RateLimitDecision.ALLOWED, service.checkRequest("alice"));
         }
-        assertFalse(service.allowRequest("alice"));
+        assertEquals(RateLimitDecision.RATE_LIMITED, service.checkRequest("alice"));
 
         clock = Clock.fixed(MINUTE_N_PLUS_ONE, ZoneOffset.UTC);
         stateStore = new InMemoryRateLimitStateStore(clock);
         service = new RateLimiterService(clock, stateStore);
 
-        assertTrue(service.allowRequest("alice"));
+        assertEquals(RateLimitDecision.ALLOWED, service.checkRequest("alice"));
     }
 
     private static final class MutableClock extends Clock {
