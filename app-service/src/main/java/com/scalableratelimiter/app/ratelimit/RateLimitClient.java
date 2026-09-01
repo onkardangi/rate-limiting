@@ -1,5 +1,7 @@
 package com.scalableratelimiter.app.ratelimit;
 
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -9,7 +11,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.net.http.HttpConnectTimeoutException;
@@ -21,15 +22,33 @@ public class RateLimitClient {
     private static final Logger log = LoggerFactory.getLogger(RateLimitClient.class);
 
     private final RestClient restClient;
+    private final CircuitBreaker circuitBreaker;
 
     public RateLimitClient(@Qualifier("rateLimiterRestClientBuilder") RestClient.Builder restClientBuilder,
-                           @Value("${rate-limiter.base-url}") String baseUrl) {
+                           @Value("${rate-limiter.base-url}") String baseUrl,
+                           CircuitBreaker rateLimiterCircuitBreaker) {
         this.restClient = restClientBuilder
                 .baseUrl(baseUrl)
                 .build();
+        this.circuitBreaker = rateLimiterCircuitBreaker;
     }
 
     public RateLimitDecision checkRateLimit(String userId) {
+        try {
+            return circuitBreaker.executeSupplier(() -> invokeRateLimiter(userId));
+        } catch (CallNotPermittedException e) {
+            log.warn("Rate limiter circuit breaker is open; skipping remote call for user {}", userId);
+            return RateLimitDecision.UNAVAILABLE;
+        } catch (RateLimiterDependencyException e) {
+            return RateLimitDecision.UNAVAILABLE;
+        }
+    }
+
+    CircuitBreaker circuitBreaker() {
+        return circuitBreaker;
+    }
+
+    private RateLimitDecision invokeRateLimiter(String userId) {
         try {
             ResponseEntity<RateLimitCheckResponse> response = restClient.post()
                     .uri("/api/rate-limit/check")
@@ -39,13 +58,18 @@ public class RateLimitClient {
 
             RateLimitCheckResponse body = response.getBody();
             if (body != null && body.decision() != null) {
-                return body.decision();
+                if (body.decision() == RateLimitDecision.ALLOWED
+                        || body.decision() == RateLimitDecision.RATE_LIMITED) {
+                    return body.decision();
+                }
+                throw new RateLimiterDependencyException(
+                        "Rate limiter returned decision: " + body.decision());
             }
-            return RateLimitDecision.UNAVAILABLE;
+            throw new RateLimiterDependencyException("Rate limiter returned an empty decision");
         } catch (RestClientResponseException e) {
-            if (e.getStatusCode().value() == HttpStatus.SERVICE_UNAVAILABLE.value()
-                    || e.getStatusCode().is5xxServerError()) {
-                return RateLimitDecision.UNAVAILABLE;
+            if (e.getStatusCode().is5xxServerError()) {
+                throw new RateLimiterDependencyException(
+                        "Rate limiter returned HTTP " + e.getStatusCode().value(), e);
             }
             throw e;
         } catch (ResourceAccessException e) {
@@ -54,10 +78,7 @@ public class RateLimitClient {
             } else {
                 log.warn("Rate limiter check failed for user {}: {}", userId, e.getMessage());
             }
-            return RateLimitDecision.UNAVAILABLE;
-        } catch (RestClientException e) {
-            log.warn("Rate limiter check failed for user {}: {}", userId, e.getMessage());
-            return RateLimitDecision.UNAVAILABLE;
+            throw new RateLimiterDependencyException("Rate limiter call failed", e);
         }
     }
 

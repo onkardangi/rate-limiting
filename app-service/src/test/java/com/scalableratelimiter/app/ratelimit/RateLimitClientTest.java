@@ -1,7 +1,8 @@
 package com.scalableratelimiter.app.ratelimit;
 
-import com.scalableratelimiter.app.config.RateLimiterClientProperties;
 import com.sun.net.httpserver.HttpServer;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,7 +40,7 @@ class RateLimitClientTest {
     void setUp() {
         restClientBuilder = RestClient.builder();
         rateLimiterServer = MockRestServiceServer.bindTo(restClientBuilder).build();
-        rateLimitClient = new RateLimitClient(restClientBuilder, BASE_URL);
+        rateLimitClient = new RateLimitClient(restClientBuilder, BASE_URL, permissiveCircuitBreaker());
     }
 
     @AfterEach
@@ -170,6 +171,14 @@ class RateLimitClientTest {
                 .build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(readTimeout);
-        return new RateLimitClient(RestClient.builder().requestFactory(requestFactory), baseUrl);
+        return new RateLimitClient(RestClient.builder().requestFactory(requestFactory), baseUrl, permissiveCircuitBreaker());
+    }
+
+    static CircuitBreaker permissiveCircuitBreaker() {
+        return CircuitBreaker.of("rate-limiter-test-permissive", CircuitBreakerConfig.custom()
+                .failureRateThreshold(100)
+                .minimumNumberOfCalls(1_000)
+                .slidingWindowSize(100)
+                .build());
     }
 }

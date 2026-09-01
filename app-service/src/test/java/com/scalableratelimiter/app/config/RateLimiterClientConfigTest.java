@@ -1,10 +1,9 @@
 package com.scalableratelimiter.app.config;
 
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.web.client.RestClient;
 
 import java.time.Duration;
 
@@ -15,20 +14,27 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 class RateLimiterClientConfigTest {
 
     @Autowired
-    private RateLimiterClientProperties properties;
+    private RateLimiterClientProperties clientProperties;
 
     @Autowired
-    @Qualifier("rateLimiterRestClientBuilder")
-    private RestClient.Builder rateLimiterRestClientBuilder;
+    private RateLimiterCircuitBreakerProperties circuitBreakerProperties;
+
+    @Autowired
+    private CircuitBreaker rateLimiterCircuitBreaker;
 
     @Test
     void configuresRateLimiterClientTimeoutsFromProperties() {
-        assertEquals(Duration.ofMillis(500), properties.connectionTimeout());
-        assertEquals(Duration.ofSeconds(1), properties.readTimeout());
+        assertEquals(Duration.ofMillis(500), clientProperties.connectionTimeout());
+        assertEquals(Duration.ofSeconds(1), clientProperties.readTimeout());
     }
 
     @Test
-    void exposesDedicatedRateLimiterRestClientBuilder() {
-        assertNotNull(rateLimiterRestClientBuilder);
+    void configuresCircuitBreakerFromProperties() {
+        assertEquals(50f, circuitBreakerProperties.failureRateThreshold());
+        assertEquals(10, circuitBreakerProperties.slidingWindowSize());
+        assertEquals(5, circuitBreakerProperties.minimumNumberOfCalls());
+        assertEquals(Duration.ofSeconds(10), circuitBreakerProperties.waitDurationInOpenState());
+        assertEquals(3, circuitBreakerProperties.permittedCallsInHalfOpenState());
+        assertNotNull(rateLimiterCircuitBreaker);
     }
 }

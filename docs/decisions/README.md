@@ -40,3 +40,4 @@ What limitations remain?
 | [ADR-006](ADR-006-atomic-counter-and-expiration-with-lua.md) | Atomic Counter and Expiration with Lua |
 | [ADR-007](ADR-007-fail-open-rate-limiter-unavailability.md) | Fail Open on Rate Limiter Unavailability |
 | [ADR-008](ADR-008-bounded-rate-limiter-wait-time.md) | Bounded Rate Limiter Wait Time |
+| [ADR-009](ADR-009-circuit-breaker-for-rate-limiter.md) | Circuit Breaker for Rate Limiter Dependency |

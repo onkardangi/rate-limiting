@@ -1,5 +1,10 @@
 package com.scalableratelimiter.app.config;
 
+import com.scalableratelimiter.app.ratelimit.RateLimiterDependencyException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -9,8 +14,13 @@ import org.springframework.web.client.RestClient;
 import java.net.http.HttpClient;
 
 @Configuration
-@EnableConfigurationProperties(RateLimiterClientProperties.class)
+@EnableConfigurationProperties({
+        RateLimiterClientProperties.class,
+        RateLimiterCircuitBreakerProperties.class
+})
 public class RateLimiterClientConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(RateLimiterClientConfig.class);
 
     @Bean
     RestClient.Builder rateLimiterRestClientBuilder(RateLimiterClientProperties properties) {
@@ -22,5 +32,24 @@ public class RateLimiterClientConfig {
         requestFactory.setReadTimeout(properties.readTimeout());
 
         return RestClient.builder().requestFactory(requestFactory);
+    }
+
+    @Bean
+    CircuitBreaker rateLimiterCircuitBreaker(RateLimiterCircuitBreakerProperties properties) {
+        CircuitBreakerConfig config = CircuitBreakerConfig.custom()
+                .failureRateThreshold(properties.failureRateThreshold())
+                .slidingWindowSize(properties.slidingWindowSize())
+                .minimumNumberOfCalls(properties.minimumNumberOfCalls())
+                .waitDurationInOpenState(properties.waitDurationInOpenState())
+                .permittedNumberOfCallsInHalfOpenState(properties.permittedCallsInHalfOpenState())
+                .recordExceptions(RateLimiterDependencyException.class)
+                .build();
+
+        CircuitBreaker circuitBreaker = CircuitBreaker.of("rateLimiter", config);
+        circuitBreaker.getEventPublisher().onStateTransition(event ->
+                log.warn("Rate limiter circuit breaker state transition: {} -> {}",
+                        event.getStateTransition().getFromState(),
+                        event.getStateTransition().getToState()));
+        return circuitBreaker;
     }
 }

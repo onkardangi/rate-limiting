@@ -31,19 +31,19 @@ Problems drive the design. Infrastructure and abstractions are introduced only w
 
 ## Current State
 
-**Phase 7 — Bounded Rate Limiter Wait Time**
+**Phase 8 — Circuit Breaker for Rate Limiter Dependency**
 
-A Maven multi-module project with bounded HTTP timeouts between app-service and rate-limiter-service:
+A Maven multi-module project with a Resilience4j circuit breaker around the app-service → rate-limiter-service HTTP call:
 
 | Module | Port | Responsibility |
 |--------|------|----------------|
-| `app-service` | 8080 | Product API; calls rate limiter with configured timeouts; fails open on timeout |
+| `app-service` | 8080 | Product API; circuit breaker + timeouts; fails open when limiter unavailable |
 | `rate-limiter-service` | 8081 | Fixed-window rate limiting; atomic counters in Redis |
 | Redis | 6379 | Shared ephemeral counters for all rate-limiter instances |
 
 | Endpoint | Service | Description |
 |----------|---------|-------------|
-| `GET /api/products/{id}` | app-service | Returns a hardcoded product response (rate limited; fails open on limiter timeout) |
+| `GET /api/products/{id}` | app-service | Returns a hardcoded product response (rate limited; fails open when limiter unavailable) |
 | `POST /api/rate-limit/check` | rate-limiter-service | Internal rate-limit check |
 
 All requests to `/api/products/*` require the `X-User-Id` header.
@@ -136,15 +136,51 @@ Production timeout values should be derived from latency SLOs and observed perce
 
 ### Important limitation
 
-Even with timeouts, every request still attempts to call an unhealthy rate-limiter service during sustained outages.
+Even with timeouts, every request still attempted the limiter until enough failures opened the circuit.
 
 **Next question:** Should we keep calling a dependency we already know is unhealthy?
 
+## Phase 8 — Circuit Breaker for Rate Limiter Dependency
+
+### The problem
+
+Phase 7 bounded individual wait time, but during sustained failure every request still spent timeout/network resources calling an unhealthy rate-limiter service.
+
+### The solution
+
+Wrap the HTTP dependency in a Resilience4j circuit breaker:
+
+```
+RateLimitFilter -> RateLimitClient -> Circuit Breaker -> HTTP call
+```
+
+- Dependency failures (timeouts, connection errors, HTTP 5xx) count toward breaker health
+- `ALLOWED` and `RATE_LIMITED` do not count as failures
+- `OPEN` breaker short-circuits without making a remote call → `UNAVAILABLE` → fail open
+
+### Circuit-breaker states
+
+- **CLOSED** — normal operation
+- **OPEN** — calls short-circuited
+- **HALF_OPEN** — limited probe calls to test recovery
+
+### Configuration (tune per environment)
+
+```properties
+rate-limiter.circuit-breaker.failure-rate-threshold=50
+rate-limiter.circuit-breaker.sliding-window-size=10
+rate-limiter.circuit-breaker.minimum-number-of-calls=5
+rate-limiter.circuit-breaker.wait-duration-in-open-state=10s
+rate-limiter.circuit-breaker.permitted-calls-in-half-open-state=3
+```
+
 ## Known Limitations
 
-### Repeated calls to unhealthy dependencies
+### Concurrent load while dependency is slow
 
-Timeouts bound wait time, but app-service still calls the rate-limiter on every request. No circuit breaker has been added.
+Even with timeouts and a circuit breaker, many concurrent requests can consume threads and connections while the rate-limiter is slow but has not yet tripped the circuit.
+
+**Next question:** How much concurrent work should we allow toward the rate-limiter dependency?
 
 ### Redis availability
 
@@ -183,8 +219,8 @@ Redis (Lua: INCR + conditional EXPIRE on rate-limit:{userId}:{windowMinute})
 
 Future phases may explore:
 
-- Circuit breaking for unhealthy dependencies
-- Observability and timeout metrics
+- Bulkheads / concurrency limits toward the rate-limiter
+- Observability and metrics
 - Load testing
 
 Specific technologies and solutions will be chosen as problems emerge during development.
