@@ -1,5 +1,6 @@
 package com.scalableratelimiter.ratelimiter.ratelimit;
 
+import com.scalableratelimiter.ratelimiter.ratelimit.policy.config.FixedWindowConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -23,7 +24,7 @@ class RateLimiterServiceTest {
     void setUp() {
         clock = Clock.fixed(MINUTE_N_START, ZoneOffset.UTC);
         stateStore = new InMemoryRateLimitStateStore(clock);
-        rateLimiterService = new RateLimiterService(clock, stateStore);
+        rateLimiterService = RateLimiterServiceTestSupport.service(clock, stateStore);
     }
 
     @Test
@@ -33,7 +34,7 @@ class RateLimiterServiceTest {
 
     @Test
     void requestsOneThroughOneHundred_areAllowed() {
-        for (int i = 0; i < RateLimiterService.MAX_REQUESTS_PER_MINUTE; i++) {
+        for (int i = 0; i < FixedWindowConfig.DEFAULT_LIMIT; i++) {
             assertEquals(RateLimitDecision.ALLOWED, rateLimiterService.checkRequest("alice"),
                     "Request " + (i + 1) + " should be allowed");
         }
@@ -41,7 +42,7 @@ class RateLimiterServiceTest {
 
     @Test
     void requestOneHundredAndOne_inSameMinute_isRejected() {
-        for (int i = 0; i < RateLimiterService.MAX_REQUESTS_PER_MINUTE; i++) {
+        for (int i = 0; i < FixedWindowConfig.DEFAULT_LIMIT; i++) {
             rateLimiterService.checkRequest("alice");
         }
 
@@ -50,7 +51,7 @@ class RateLimiterServiceTest {
 
     @Test
     void differentUsers_haveIndependentCounters() {
-        for (int i = 0; i < RateLimiterService.MAX_REQUESTS_PER_MINUTE; i++) {
+        for (int i = 0; i < FixedWindowConfig.DEFAULT_LIMIT; i++) {
             rateLimiterService.checkRequest("alice");
         }
 
@@ -60,14 +61,14 @@ class RateLimiterServiceTest {
 
     @Test
     void afterMovingToNextMinute_userIsAllowedAgain() {
-        for (int i = 0; i < RateLimiterService.MAX_REQUESTS_PER_MINUTE; i++) {
+        for (int i = 0; i < FixedWindowConfig.DEFAULT_LIMIT; i++) {
             rateLimiterService.checkRequest("alice");
         }
         assertEquals(RateLimitDecision.RATE_LIMITED, rateLimiterService.checkRequest("alice"));
 
         clock = Clock.fixed(MINUTE_N_PLUS_ONE, ZoneOffset.UTC);
         stateStore = new InMemoryRateLimitStateStore(clock);
-        rateLimiterService = new RateLimiterService(clock, stateStore);
+        rateLimiterService = RateLimiterServiceTestSupport.service(clock, stateStore);
 
         assertEquals(RateLimitDecision.ALLOWED, rateLimiterService.checkRequest("alice"));
     }
@@ -81,18 +82,18 @@ class RateLimiterServiceTest {
     void fixedWindowBoundary_allowsBurstAcrossMinuteBoundary() {
         clock = Clock.fixed(MINUTE_N_END, ZoneOffset.UTC);
         stateStore = new InMemoryRateLimitStateStore(clock);
-        rateLimiterService = new RateLimiterService(clock, stateStore);
+        rateLimiterService = RateLimiterServiceTestSupport.service(clock, stateStore);
 
-        for (int i = 0; i < RateLimiterService.MAX_REQUESTS_PER_MINUTE; i++) {
+        for (int i = 0; i < FixedWindowConfig.DEFAULT_LIMIT; i++) {
             assertEquals(RateLimitDecision.ALLOWED, rateLimiterService.checkRequest("alice"));
         }
         assertEquals(RateLimitDecision.RATE_LIMITED, rateLimiterService.checkRequest("alice"));
 
         clock = Clock.fixed(MINUTE_N_PLUS_ONE, ZoneOffset.UTC);
         stateStore = new InMemoryRateLimitStateStore(clock);
-        rateLimiterService = new RateLimiterService(clock, stateStore);
+        rateLimiterService = RateLimiterServiceTestSupport.service(clock, stateStore);
 
-        for (int i = 0; i < RateLimiterService.MAX_REQUESTS_PER_MINUTE; i++) {
+        for (int i = 0; i < FixedWindowConfig.DEFAULT_LIMIT; i++) {
             assertEquals(RateLimitDecision.ALLOWED, rateLimiterService.checkRequest("alice"));
         }
         assertEquals(RateLimitDecision.RATE_LIMITED, rateLimiterService.checkRequest("alice"));

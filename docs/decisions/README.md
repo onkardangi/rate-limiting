@@ -42,3 +42,4 @@ What limitations remain?
 | [ADR-008](ADR-008-bounded-rate-limiter-wait-time.md) | Bounded Rate Limiter Wait Time |
 | [ADR-009](ADR-009-circuit-breaker-for-rate-limiter.md) | Circuit Breaker for Rate Limiter Dependency |
 | [ADR-010](ADR-010-bulkhead-rate-limiter-concurrency.md) | Bulkhead for Rate Limiter Concurrency |
+| [ADR-011](ADR-011-rate-limit-policy-abstraction.md) | Rate-Limit Policy Abstraction |

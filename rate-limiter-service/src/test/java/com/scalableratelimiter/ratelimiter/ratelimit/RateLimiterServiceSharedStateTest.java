@@ -1,5 +1,7 @@
 package com.scalableratelimiter.ratelimiter.ratelimit;
 
+import com.scalableratelimiter.ratelimiter.ratelimit.policy.FixedWindowRateLimitPolicy;
+import com.scalableratelimiter.ratelimiter.ratelimit.policy.config.FixedWindowConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -34,10 +36,10 @@ class RateLimiterServiceSharedStateTest {
 
     @Test
     void twoServiceInstances_shareSameStateStore() {
-        RateLimiterService serviceA = new RateLimiterService(clock, stateStore);
-        RateLimiterService serviceB = new RateLimiterService(clock, stateStore);
+        RateLimiterService serviceA = RateLimiterServiceTestSupport.service(clock, stateStore);
+        RateLimiterService serviceB = RateLimiterServiceTestSupport.service(clock, stateStore);
 
-        for (int i = 0; i < RateLimiterService.MAX_REQUESTS_PER_MINUTE; i++) {
+        for (int i = 0; i < FixedWindowConfig.DEFAULT_LIMIT; i++) {
             assertEquals(RateLimitDecision.ALLOWED, serviceA.checkRequest("alice"));
         }
 
@@ -46,15 +48,15 @@ class RateLimiterServiceSharedStateTest {
 
     @Test
     void firstIncrement_returnsOne() {
-        String key = RateLimiterService.buildKey("alice", 123L);
+        String key = FixedWindowRateLimitPolicy.buildKey("alice", 123L);
 
-        assertEquals(1, stateStore.increment(key, RateLimiterService.WINDOW_KEY_TTL));
+        assertEquals(1, stateStore.increment(key, FixedWindowConfig.defaults().keyTtl()));
     }
 
     @Test
     void subsequentIncrements_returnIncreasingCounts() {
-        String key = RateLimiterService.buildKey("alice", 123L);
-        Duration ttl = RateLimiterService.WINDOW_KEY_TTL;
+        String key = FixedWindowRateLimitPolicy.buildKey("alice", 123L);
+        Duration ttl = FixedWindowConfig.defaults().keyTtl();
 
         assertEquals(1, stateStore.increment(key, ttl));
         assertEquals(2, stateStore.increment(key, ttl));
@@ -63,18 +65,18 @@ class RateLimiterServiceSharedStateTest {
 
     @Test
     void firstIncrement_configuresWindowKeyExpiration() {
-        String key = RateLimiterService.buildKey("alice", 123L);
-        stateStore.increment(key, RateLimiterService.WINDOW_KEY_TTL);
+        String key = FixedWindowRateLimitPolicy.buildKey("alice", 123L);
+        stateStore.increment(key, FixedWindowConfig.defaults().keyTtl());
 
         Duration remainingTtl = stateStore.ttlFor(key);
         assertTrue(remainingTtl.compareTo(Duration.ofMinutes(1)) > 0);
-        assertTrue(remainingTtl.compareTo(RateLimiterService.WINDOW_KEY_TTL) <= 0);
+        assertTrue(remainingTtl.compareTo(FixedWindowConfig.defaults().keyTtl()) <= 0);
     }
 
     @Test
     void subsequentIncrements_doNotResetCounterToOne() {
-        String key = RateLimiterService.buildKey("alice", 123L);
-        Duration ttl = RateLimiterService.WINDOW_KEY_TTL;
+        String key = FixedWindowRateLimitPolicy.buildKey("alice", 123L);
+        Duration ttl = FixedWindowConfig.defaults().keyTtl();
 
         stateStore.increment(key, ttl);
         stateStore.increment(key, ttl);
@@ -96,7 +98,7 @@ class RateLimiterServiceSharedStateTest {
 
     @Test
     void concurrentIncrements_allowExactlyOneHundred() throws Exception {
-        RateLimiterService service = new RateLimiterService(clock, stateStore);
+        RateLimiterService service = RateLimiterServiceTestSupport.service(clock, stateStore);
 
         int threadCount = 50;
         int requestsPerThread = 10;
@@ -125,21 +127,21 @@ class RateLimiterServiceSharedStateTest {
         assertTrue(doneLatch.await(10, TimeUnit.SECONDS), "Concurrent requests did not finish in time");
         executor.shutdown();
 
-        assertEquals(RateLimiterService.MAX_REQUESTS_PER_MINUTE, allowedCount.get());
+        assertEquals(FixedWindowConfig.DEFAULT_LIMIT, allowedCount.get());
     }
 
     @Test
     void concurrentRequestsInNewWindow_resetCorrectly() {
-        RateLimiterService service = new RateLimiterService(clock, stateStore);
+        RateLimiterService service = RateLimiterServiceTestSupport.service(clock, stateStore);
 
-        for (int i = 0; i < RateLimiterService.MAX_REQUESTS_PER_MINUTE; i++) {
+        for (int i = 0; i < FixedWindowConfig.DEFAULT_LIMIT; i++) {
             assertEquals(RateLimitDecision.ALLOWED, service.checkRequest("alice"));
         }
         assertEquals(RateLimitDecision.RATE_LIMITED, service.checkRequest("alice"));
 
         clock = Clock.fixed(MINUTE_N_PLUS_ONE, ZoneOffset.UTC);
         stateStore = new InMemoryRateLimitStateStore(clock);
-        service = new RateLimiterService(clock, stateStore);
+        service = RateLimiterServiceTestSupport.service(clock, stateStore);
 
         assertEquals(RateLimitDecision.ALLOWED, service.checkRequest("alice"));
     }

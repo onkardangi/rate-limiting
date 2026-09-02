@@ -1,5 +1,6 @@
 package com.scalableratelimiter.ratelimiter.ratelimit;
 
+import com.scalableratelimiter.ratelimiter.ratelimit.policy.config.FixedWindowConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,7 +30,7 @@ class RateLimiterServiceInfrastructureTest {
     @BeforeEach
     void setUp() {
         Clock clock = Clock.fixed(MINUTE_N_START, ZoneOffset.UTC);
-        rateLimiterService = new RateLimiterService(clock, stateStore);
+        rateLimiterService = RateLimiterServiceTestSupport.service(clock, stateStore);
     }
 
     @Test
@@ -42,7 +43,7 @@ class RateLimiterServiceInfrastructureTest {
     @Test
     void quotaExceeded_returnsRateLimited() {
         when(stateStore.increment(anyString(), any(Duration.class)))
-                .thenReturn((long) RateLimiterService.MAX_REQUESTS_PER_MINUTE + 1);
+                .thenReturn((long) FixedWindowConfig.DEFAULT_LIMIT + 1);
 
         assertEquals(RateLimitDecision.RATE_LIMITED, rateLimiterService.checkRequest("alice"));
     }

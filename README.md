@@ -239,6 +239,8 @@ app-service (:8080)
   v (HTTP, circuit breaker → bulkhead)
 rate-limiter-service (:8081)
   |
+  +--> RateLimitPolicyResolver → FixedWindowRateLimitPolicy (default)
+  |
   v
 Redis (Lua: INCR + conditional EXPIRE on rate-limit:{userId}:{windowMinute})
 ```
@@ -247,7 +249,7 @@ Redis (Lua: INCR + conditional EXPIRE on rate-limit:{userId}:{windowMinute})
 
 Future phases may explore:
 
-- Rate-limit algorithm improvements (sliding window, token bucket)
+- Sliding window log and token bucket policy implementations
 - Observability and metrics
 - Load testing
 
