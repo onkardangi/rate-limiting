@@ -1,31 +1,51 @@
 package com.scalableratelimiter.ratelimiter.ratelimit.policy;
 
 import com.scalableratelimiter.ratelimiter.ratelimit.RateLimitDecision;
+import com.scalableratelimiter.ratelimiter.ratelimit.SlidingWindowLogStateStore;
 import com.scalableratelimiter.ratelimiter.ratelimit.policy.config.SlidingWindowLogConfig;
 
 /**
- * Extension point for exact rolling-window rate limiting.
+ * Exact rolling-window rate limiting using a per-identity log of accepted requests.
  *
- * <p>Future behavior for each request at time {@code T}:
- * <ol>
- *   <li>Remove accepted request timestamps {@code <= T - windowDuration}</li>
- *   <li>Count timestamps remaining</li>
- *   <li>If count {@code >= limit}: return {@code RATE_LIMITED}</li>
- *   <li>Otherwise: record {@code T} and return {@code ALLOWED}</li>
- * </ol>
- * The remove → count → decide → add operation must be atomic in Redis, likely via Lua.
+ * <p>Boundary semantics at time {@code T}: accepted requests in the interval
+ * {@code (T - windowDuration, T]} count toward the limit. A request exactly
+ * {@code windowDuration} old no longer counts.
  */
 public class SlidingWindowLogRateLimitPolicy implements RateLimitPolicy {
 
-    private final SlidingWindowLogConfig config;
+    public static final String KEY_PREFIX = "rate-limit:sliding:";
 
-    public SlidingWindowLogRateLimitPolicy(SlidingWindowLogConfig config) {
+    private final SlidingWindowLogStateStore stateStore;
+    private final SlidingWindowLogConfig config;
+    private final SlidingWindowMemberIdSupplier memberIdSupplier;
+
+    public SlidingWindowLogRateLimitPolicy(SlidingWindowLogStateStore stateStore,
+                                           SlidingWindowLogConfig config) {
+        this(stateStore, config, SlidingWindowMemberIdSupplier.randomUuid());
+    }
+
+    public SlidingWindowLogRateLimitPolicy(SlidingWindowLogStateStore stateStore,
+                                           SlidingWindowLogConfig config,
+                                           SlidingWindowMemberIdSupplier memberIdSupplier) {
+        this.stateStore = stateStore;
         this.config = config;
+        this.memberIdSupplier = memberIdSupplier;
     }
 
     @Override
     public RateLimitDecision check(RateLimitContext context) {
-        throw new UnsupportedOperationException(
-                "Sliding window log policy is not implemented yet");
+        String key = buildKey(context.identity());
+        boolean allowed = stateStore.tryAccept(
+                key,
+                config.limit(),
+                config.windowDuration(),
+                config.keyTtl(),
+                memberIdSupplier.next());
+
+        return allowed ? RateLimitDecision.ALLOWED : RateLimitDecision.RATE_LIMITED;
+    }
+
+    public static String buildKey(String identity) {
+        return KEY_PREFIX + identity;
     }
 }

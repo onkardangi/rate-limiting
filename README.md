@@ -240,16 +240,18 @@ app-service (:8080)
 rate-limiter-service (:8081)
   |
   +--> RateLimitPolicyResolver → FixedWindowRateLimitPolicy (default)
+  |                         └→ SlidingWindowLogRateLimitPolicy (available, not default)
   |
   v
-Redis (Lua: INCR + conditional EXPIRE on rate-limit:{userId}:{windowMinute})
+Redis (fixed window: Lua INCR+TTL | sliding log: Lua ZSET rolling window)
 ```
 
 ## Planned Evolution
 
 Future phases may explore:
 
-- Sliding window log and token bucket policy implementations
+- Token bucket policy implementation
+- Per-endpoint policy selection
 - Observability and metrics
 - Load testing
 

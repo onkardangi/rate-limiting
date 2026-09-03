@@ -1,5 +1,7 @@
 package com.scalableratelimiter.ratelimiter.ratelimit.policy;
 
+import com.scalableratelimiter.ratelimiter.ratelimit.InMemorySlidingWindowLogStateStore;
+import com.scalableratelimiter.ratelimiter.ratelimit.MutableSlidingWindowTimeSource;
 import com.scalableratelimiter.ratelimiter.ratelimit.RateLimitDecision;
 import com.scalableratelimiter.ratelimiter.ratelimit.policy.config.FixedWindowConfig;
 import com.scalableratelimiter.ratelimiter.ratelimit.policy.config.SlidingWindowLogConfig;
@@ -8,6 +10,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class RateLimitPolicyConfigValidationTest {
@@ -49,12 +52,15 @@ class RateLimitPolicyConfigValidationTest {
     }
 
     @Test
-    void slidingWindowLogPolicy_isNotImplementedYet() {
+    void slidingWindowLogPolicy_isImplemented() {
+        MutableSlidingWindowTimeSource timeSource = new MutableSlidingWindowTimeSource(1_700_000_000_000L);
+        InMemorySlidingWindowLogStateStore store = new InMemorySlidingWindowLogStateStore(timeSource);
         SlidingWindowLogRateLimitPolicy policy = new SlidingWindowLogRateLimitPolicy(
-                new SlidingWindowLogConfig(100, Duration.ofSeconds(60)));
+                store,
+                new SlidingWindowLogConfig(100, Duration.ofSeconds(60)),
+                () -> "member-1");
 
-        assertThrows(UnsupportedOperationException.class,
-                () -> policy.check(new RateLimitContext("alice")));
+        assertEquals(RateLimitDecision.ALLOWED, policy.check(new RateLimitContext("alice")));
     }
 
     @Test
